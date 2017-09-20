@@ -1,0 +1,7 @@
+{
+  "user":"tcotav",
+  "keyfile":"/home/tcotav/.ssh/rcmd_test_key",
+  "numworkers":10,
+  "prettyprint":true,
+  "erroronly":false
+}
