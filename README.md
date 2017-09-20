@@ -1,6 +1,6 @@
-# rcma
+## rcmd
 
-rcma is the AWS-centric rcmd tool -- a simple golang binary that:
+rcmd is the AWS-centric remote command tool based around parallel runs of ssh.  It is a simple golang binary that:
   - takes as input a comma-separated list of AWS tags to match on and a command 
   - includes ability to exclude based on certain tags
   - connects via ssh to all hosts that match the tag filter
@@ -13,26 +13,55 @@ rcma is the AWS-centric rcmd tool -- a simple golang binary that:
 
 It was designed to be as simple as possible.  Zero work was done to support any AWS configs other than the default user files in ~/.aws.
 
+## Releases
+
+Binary Linux and OSX downloads found [here](https://github.com/tcotav/rcmd/releases).
+
+## Examples
+
+Match nodes tagged with `Name=*web*,Team=web` and run the command  `ps aux | grep nginx| wc -l`.  We pass it the `--quiet` flag which means keep it short in response.
+
 ```
-rcma -error -privateip Name=*web*,Team=infra "ps aux | grep nginx | wc -l"
+rcmd -c ./config.json --quiet Name=*web*,Team=web "ps aux | grep nginx| wc -l"
 ```
 
-# rcmd -- original script
 
-## Description
+Exclude tag example `-x Name=web`, match on `Team=web`.  `--privateip` tells rcmd to use the internal IP of the matched hosts.
+ 
+```
+rcmd -c ./config.json --privateip -x Name=web Team=web "date"
+```
 
-Command line tool to enact changes or makes queries across multiple linux hosts via ssh.  I wrote a python version of this originally to help manage legacy infrastructure at my day job.
+Same as the first example except we dump out json (in case you want to chain it with some other commands or automation).
 
-## Features -- some not present
+```
+rcmd -c ./config.json --json --privateip Name=*epoch*,Team=web "date"
+```
 
-### Input
-  - Pattern matching input against a list of host files
-  - source can be a local file list, input list, or etcd url
-  - specify a numeric range (coupled with the host match -- so host matches 'web' and we specify -range 100-123.  This assumes you use hostname convention like <location>-<host type>-<number>
-  - list of files to exclude
+The same as the first but only return responses that contain errors.
+```
+rcmd -error -privateip Name=*web*,Team=web "cat /home/ubuntu/file-doesn't-exist"
+```
 
-### Output
-  - dump to log file
-  - json return value
-  - web endpoint for very hardcoded values -- like nginx process count on all hosts dumps json blob of hostname + count?  maybe?  lots of security concerns -- worse than with the basic idea :)
+## Config
+
+Sample in etc/config.json
+
+```
+{
+  "user":"ubuntu",
+  "keyfile":"/home/tcotav/.ssh/rcmd_test_key",
+  "numworkers":10,
+  "erroronly":false
+}
+```
+
+	- user - ssh user connect to nodes with
+	- keyfile - ssh key for the above user
+	- numworkers - number of parallel ssh commands to run
+	- erroronly - default of the print only errors flag
+
+TODO - put some of the other switches here to set defaults.
+
+
 
