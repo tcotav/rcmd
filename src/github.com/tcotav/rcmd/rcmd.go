@@ -76,10 +76,10 @@ func SshSession(user string, keyFile string, targetUrl string, cmd string) *Host
 
 	// client can be used across multiple sessions
 	session, err := connection.NewSession()
-	if err != nil {
+	/*if err != nil {
 		r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
 		return r
-	}
+	}*/
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
 	session.Stdout = &stdoutBuf
