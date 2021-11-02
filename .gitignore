@@ -23,9 +23,11 @@ _testmain.go
 *.test
 *.prof
 
-# vim
+# vim and IDE
 *~
 *.sw*
+.vscode/*
 
 # path based
 bin/*
+
