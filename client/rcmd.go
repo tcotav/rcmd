@@ -76,20 +76,21 @@ func SshSession(user string, keyFile string, targetUrl string, cmd string) *Host
 
 	// client can be used across multiple sessions
 	session, err := connection.NewSession()
-	/*if err != nil {
+	if err != nil {
 		r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
 		return r
-	}*/
+	}
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
 	session.Stdout = &stdoutBuf
 	session.Stderr = &stderrBuf
 
 	err = session.Run(cmd)
-	if err != nil {
-		r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
-		return r
-	}
+	/*
+		if err != nil {
+			r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
+			return r
+		}*/
 
 	r := &HostCmdReturn{Host: targetUrl, Stdout: stdoutBuf.String(), Stderr: stderrBuf.String(), Timestamp: t}
 	return r
@@ -126,11 +127,73 @@ func worker(id int, jobs <-chan HostCmdRequest, results chan<- HostCmdReturn) {
 	}
 }
 
-func ProcessListBase(hostList []string, numWorkers int, ssh_user string, ssh_keyfile string, cmd string) RunResult {
-	return ProcessList(hostList, numWorkers, ssh_user, ssh_keyfile, cmd, false)
+func ProcessList(hostList []string, numWorkers int, ssh_user string, ssh_keyfile string, cmd string, errOnly bool, rollSleepTime int) RunResult {
+	numHosts := len(hostList)
+	jobs := make(chan HostCmdRequest, numHosts)
+	results := make(chan HostCmdReturn, numHosts)
+
+	if numWorkers > numHosts {
+		numWorkers = numHosts
+	}
+
+	// get the worker pool built
+	for wid := 0; wid < numWorkers; wid++ {
+		go worker(wid, jobs, results)
+	}
+
+	r, _ := regexp.Compile("(:[0-9]+)$")
+	var errCount, successCount int
+	retList := make([]HostCmdReturn, 0)
+	for i := 0; i < numHosts; i = i + numWorkers {
+		for j := 0; j < numWorkers; j++ {
+			if i+j >= numHosts {
+				break
+			}
+			useHost := hostList[i+j]
+			if !r.MatchString(useHost) {
+				useHost = fmt.Sprintf("%s:22", useHost)
+			}
+			jjob := HostCmdRequest{SshUser: ssh_user, SshKeyfile: ssh_keyfile, Host: useHost, Command: cmd}
+			jobs <- jjob
+		}
+
+		time.Sleep(time.Millisecond * time.Duration(rollSleepTime*1000))
+		//fmt.Printf("Finished hosts: %d\n", i)
+
+		for j := 0; j < numWorkers; j++ {
+			if i+j >= numHosts {
+				break
+			}
+
+			res := <-results
+			if res.Stderr == "" {
+				successCount++
+			} else {
+				// print this out so we can abort if necessary
+				fmt.Printf("ERROR: %s\n", res.Stderr)
+				errCount++
+			}
+
+			if errOnly {
+				// test if Stderr contains anything
+				// skip to next if empty
+				if res.Stderr == "" {
+					continue
+				}
+			}
+			retList = append(retList, res)
+		}
+	}
+
+	summary := make(map[string]int)
+	summary["total"] = successCount + errCount
+	summary["success"] = successCount
+	summary["failures"] = errCount
+
+	return RunResult{Summary: summary, HostList: retList}
 }
 
-func ProcessList(hostList []string, numWorkers int, ssh_user string, ssh_keyfile string, cmd string, errOnly bool) RunResult {
+func ProcessList2(hostList []string, numWorkers int, ssh_user string, ssh_keyfile string, cmd string, errOnly bool, rollSleepTime int) RunResult {
 	numHosts := len(hostList)
 	jobs := make(chan HostCmdRequest, numHosts)
 	results := make(chan HostCmdReturn, numHosts)
@@ -144,7 +207,21 @@ func ProcessList(hostList []string, numWorkers int, ssh_user string, ssh_keyfile
 	}
 
 	r, _ := regexp.Compile("(:[0-9]+)$")
+	rollCount := 0
+	var errCount, successCount int
+	retList := make([]HostCmdReturn, 0)
 	for i := 0; i < numHosts; i++ {
+		/*
+			idea here is that we work in sets of numWorkers
+			then sleep for rollSleepTime duration before moving on to the rest
+		*/
+		if rollSleepTime != 0 {
+			if rollCount == numWorkers {
+				time.Sleep(time.Millisecond * time.Duration(rollSleepTime*1000))
+				rollCount = 0
+			}
+			rollCount++
+		}
 		useHost := hostList[i]
 		if !r.MatchString(useHost) {
 			useHost = fmt.Sprintf("%s:22", useHost)
@@ -153,8 +230,6 @@ func ProcessList(hostList []string, numWorkers int, ssh_user string, ssh_keyfile
 		jobs <- j
 	}
 
-	var errCount, successCount int
-	retList := make([]HostCmdReturn, 0)
 	for i := 0; i < numHosts; i++ {
 		res := <-results
 		if res.Stderr == "" {
