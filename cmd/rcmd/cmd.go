@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/spf13/viper"
-	"github.com/tcotav/rcmd/rcmd"
-	"github.com/tcotav/rcmd/aws"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/viper"
+	"github.com/tcotav/rcmd/aws"
+	rcmd "github.com/tcotav/rcmd/client"
 )
 
 const USAGE = `
@@ -21,6 +22,13 @@ const USAGE = `
     rcmd -c ./config.json --quiet --privateip -x Name=*mywebsite* Team=ops "date"
     rcmd -c ./config.json --json --privateip -x Name=*mywebsite* Team=ops "date"
 
+	Here's an example of rolling updates -- need both -r and -s.
+	  --rolling/-r is the size of one set of hosts we're acting on
+		--sleep/-s is the time to wait in between batches
+	
+		rcmd -c ./config.json --json --rolling 2 --sleep 2 --privateip Name=store-site-prod-host "ls -la | wc -l"
+		rcmd -c ./config.json --json -r 2 -s 2 --privateip Name=store-site-prod-host "ls -la | wc -l"
+
 	Help at:
 		rcmd -h
 `
@@ -28,10 +36,16 @@ const USAGE = `
 var useConfig = flag.String("config", "", "string -- full path to config.json")
 var excludeTags = flag.String("excludetags", "", "string of tags to exclude, expect k=v,k1=v1")
 
+var rollSleepTime = flag.Int("sleep", 0, "time to sleep betweens sets during rolling update")
+var rolling = flag.Int("rolling", 0, "work set size in rolling update")
+
 func init() {
 	// example with short version for long flag
 	flag.StringVar(useConfig, "c", "", "string -- full path to config.json")
 	flag.StringVar(excludeTags, "x", "", "string of tags to exclude, expect k=v,k1=v1")
+
+	flag.IntVar(rollSleepTime, "s", 0, "time to sleep betweens sets during rolling update")
+	flag.IntVar(rolling, "r", 0, "work set size in rolling update")
 }
 
 type JsonResults struct {
@@ -77,6 +91,7 @@ func main() {
 	}
 
 	viper.SetDefault("numworkers", 10)
+	viper.SetDefault("sleeptime", 0)
 
 	// get ssh key location from config file
 	// ssh as user
@@ -117,13 +132,19 @@ func main() {
 			hostMap[h.PublicIpAddress] = h
 		}
 	}
+
 	// change to config based
 	numWorkers := viper.GetInt("numworkers")
+
+	// we want to do a rolling update
+	if *rollSleepTime != 0 && *rolling != 0 {
+		numWorkers = *rolling
+	}
 
 	/*
 		TODO -- a json option
 	*/
-	ret := rcmd.ProcessList(hostList, numWorkers, ssh_user, ssh_keyfile, argList[1], *errorOnly)
+	ret := rcmd.ProcessList(hostList, numWorkers, ssh_user, ssh_keyfile, argList[1], *errorOnly, *rollSleepTime)
 	if *jsonFlag { // json report output
 		for _, h := range ret.HostList {
 			// remove the :22 from the string
