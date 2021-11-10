@@ -1,14 +1,14 @@
 package aws
 
 import (
-	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	rcmd "github.com/tcotav/rcmd/client"
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	rcmd "github.com/tcotav/rcmd/client"
 )
 
 const SPLIT = "="
@@ -31,7 +31,7 @@ func GetHostList(inData string, excludeData string) ([]Hostdef, error) {
 	for _, kvpair := range strings.Split(inData, ",") {
 		kvset := strings.Split(kvpair, SPLIT)
 		if len(kvset) != 2 {
-			return nil, errors.New(fmt.Sprintf("invalid tag input: %s", kvpair))
+			return nil, fmt.Errorf("invalid tag input: %s", kvpair)
 		}
 
 		// values expects an []string
@@ -58,7 +58,7 @@ func GetHostList(inData string, excludeData string) ([]Hostdef, error) {
 			kvset := strings.Split(kvpair, SPLIT)
 			// TODO -- what about matching any tag k regardless of value
 			if len(kvset) != 2 {
-				return nil, errors.New(fmt.Sprintf("invalid tag input: %s", kvpair))
+				return nil, fmt.Errorf("invalid tag input: %s", kvpair)
 			}
 			excludeList[kvset[0]] = kvset[1]
 		}
