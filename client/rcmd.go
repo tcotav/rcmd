@@ -4,25 +4,24 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func PublicKeyFile(file string) ssh.AuthMethod {
 	buffer, err := ioutil.ReadFile(file)
 	if err != nil {
-		fmt.Println(err.Error())
-		return nil
+		panic(fmt.Sprintf("Failed to read key file:%s", err.Error()))
 	}
 
 	key, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		fmt.Println(err.Error())
-		return nil
+		panic(fmt.Sprintf("Failed to parse key file:%s", err.Error()))
 	}
 	return ssh.PublicKeys(key)
 }
@@ -59,25 +58,24 @@ type HostCmdRequest struct {
 // let's put in a method to make pretty output
 func (hcr HostCmdReturn) Dump() []string {
 	var retList []string
-	retList = append(retList, hcr.Host)
-	for _, s := range strings.Split(hcr.Stdout, "\n") {
-		retList = append(retList, s)
-	}
+	retList = append(retList, strings.Split(hcr.Stdout, "\n")...)
 	return retList
 }
 
 func SshSession(user string, keyFile string, targetUrl string, cmd string) *HostCmdReturn {
-	t := fmt.Sprintf("%s", time.Now())
+	t := time.Now().String()
 	connection, err := GetSshClient(user, keyFile, targetUrl)
 	if err != nil {
-		r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
+		r := &HostCmdReturn{Host: targetUrl,
+			Stderr: fmt.Sprintf("failed on getSSHClient for user:%s, keyfile:%s, targetUrl: %s, with err:%s", user, keyFile, targetUrl, err.Error()), Timestamp: t}
 		return r
 	}
 
 	// client can be used across multiple sessions
 	session, err := connection.NewSession()
 	if err != nil {
-		r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
+		r := &HostCmdReturn{Host: targetUrl,
+			Stderr: fmt.Sprintf("failed on ssh NewSession for user:%s, keyfile:%s, targetUrl: %s, with err:%s", user, keyFile, targetUrl, err.Error()), Timestamp: t}
 		return r
 	}
 	var stdoutBuf bytes.Buffer
@@ -86,11 +84,10 @@ func SshSession(user string, keyFile string, targetUrl string, cmd string) *Host
 	session.Stderr = &stderrBuf
 
 	err = session.Run(cmd)
-	/*
-		if err != nil {
-			r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("local: %s", err.Error()), Timestamp: t}
-			return r
-		}*/
+	if err != nil {
+		r := &HostCmdReturn{Host: targetUrl, Stderr: fmt.Sprintf("session failure on run: %s", err.Error()), Timestamp: t}
+		return r
+	}
 
 	r := &HostCmdReturn{Host: targetUrl, Stdout: stdoutBuf.String(), Stderr: stderrBuf.String(), Timestamp: t}
 	return r
@@ -183,69 +180,6 @@ func ProcessList(hostList []string, numWorkers int, ssh_user string, ssh_keyfile
 			}
 			retList = append(retList, res)
 		}
-	}
-
-	summary := make(map[string]int)
-	summary["total"] = successCount + errCount
-	summary["success"] = successCount
-	summary["failures"] = errCount
-
-	return RunResult{Summary: summary, HostList: retList}
-}
-
-func ProcessList2(hostList []string, numWorkers int, ssh_user string, ssh_keyfile string, cmd string, errOnly bool, rollSleepTime int) RunResult {
-	numHosts := len(hostList)
-	jobs := make(chan HostCmdRequest, numHosts)
-	results := make(chan HostCmdReturn, numHosts)
-
-	if numWorkers > numHosts {
-		numWorkers = numHosts
-	}
-
-	for wid := 0; wid < numWorkers; wid++ {
-		go worker(wid, jobs, results)
-	}
-
-	r, _ := regexp.Compile("(:[0-9]+)$")
-	rollCount := 0
-	var errCount, successCount int
-	retList := make([]HostCmdReturn, 0)
-	for i := 0; i < numHosts; i++ {
-		/*
-			idea here is that we work in sets of numWorkers
-			then sleep for rollSleepTime duration before moving on to the rest
-		*/
-		if rollSleepTime != 0 {
-			if rollCount == numWorkers {
-				time.Sleep(time.Millisecond * time.Duration(rollSleepTime*1000))
-				rollCount = 0
-			}
-			rollCount++
-		}
-		useHost := hostList[i]
-		if !r.MatchString(useHost) {
-			useHost = fmt.Sprintf("%s:22", useHost)
-		}
-		j := HostCmdRequest{SshUser: ssh_user, SshKeyfile: ssh_keyfile, Host: useHost, Command: cmd}
-		jobs <- j
-	}
-
-	for i := 0; i < numHosts; i++ {
-		res := <-results
-		if res.Stderr == "" {
-			successCount++
-		} else {
-			errCount++
-		}
-
-		if errOnly {
-			// test if Stderr contains anything
-			// skip to next if empty
-			if res.Stderr == "" {
-				continue
-			}
-		}
-		retList = append(retList, res)
 	}
 
 	summary := make(map[string]int)
